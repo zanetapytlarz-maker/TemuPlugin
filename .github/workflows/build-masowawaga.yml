@@ -1,0 +1,16 @@
+name: Build MasowaWaga
+on:
+  push:
+    branches: [ build-masowawaga-20260902 ]
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        shell: cmd
+        run: msbuild PluginEU.csproj /p:Configuration=Release /p:Platform=AnyCPU
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MasowaWaga-DLL
+          path: "bin/Release/ELEKTROMET - MasowaWaga.dll"
