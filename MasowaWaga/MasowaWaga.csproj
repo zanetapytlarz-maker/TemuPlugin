@@ -1,1 +1,0 @@
-<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net48</TargetFramework><UseWindowsForms>true</UseWindowsForms><OutputType>Library</OutputType><AssemblyName>ELEKTROMET - MasowaWaga</AssemblyName><ImplicitUsings>disable</ImplicitUsings><Nullable>disable</Nullable></PropertyGroup></Project>
