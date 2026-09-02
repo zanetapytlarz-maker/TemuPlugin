@@ -1,4 +1,4 @@
-name: Build TEMU Plugin
+name: Build EasyUploader Diagnostics
 
 on:
   push:
@@ -9,25 +9,17 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
-
+        uses: actions/checkout@v4
       - name: Setup .NET
-        uses: actions/setup-dotnet@v3
+        uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-
-      - name: Restore
-        run: dotnet restore TemuPlugin.sln
-
-      - name: Build
-        run: dotnet build TemuPlugin.sln -c Release
-
-      - name: Upload DLL
-        uses: actions/upload-artifact@v3
+      - name: Build diagnostics
+        run: dotnet build DiagnostykaEU/DiagnostykaEU.csproj -c Release
+      - name: Upload diagnostics DLL
+        uses: actions/upload-artifact@v4
         with:
-          name: TemuPlugin
-          path: |
-            **/bin/Release/net8.0-windows/*.dll
+          name: DiagnostykaEdycji-DLL
+          path: "DiagnostykaEU/bin/Release/net48/ELEKTROMET - DiagnostykaEdycji.dll"
