@@ -1,0 +1,45 @@
+using System;
+using System.Collections.Generic;
+using System.ComponentModel;
+using System.Globalization;
+using System.Windows.Forms;
+using System.Xml;
+
+public class PluginEU
+{
+    public static string WersjaEU { get { return "3.44.0"; } }
+
+    [DisplayName("Masowa zmiana wagi")]
+    public static string[] T_MasowaWaga(string zazn_xml)
+    {
+        var sql = new List<string>();
+        try
+        {
+            XmlDocument xml = new XmlDocument();
+            xml.LoadXml(zazn_xml);
+            XmlNodeList nodes = xml.SelectNodes("/ArrayOfDaneTransStruct/DaneTransStruct");
+            if (nodes == null || nodes.Count == 0) { MessageBox.Show("Najpierw zaznacz co najmniej jedno zamówienie.", "Masowa zmiana wagi"); return sql.ToArray(); }
+            using (Form form = new Form())
+            using (Label label = new Label())
+            using (TextBox input = new TextBox())
+            using (Button ok = new Button())
+            using (Button cancel = new Button())
+            {
+                form.Text = "Masowa zmiana wagi"; form.Width = 390; form.Height = 175; form.FormBorderStyle = FormBorderStyle.FixedDialog; form.StartPosition = FormStartPosition.CenterScreen; form.MaximizeBox = false; form.MinimizeBox = false; form.ShowInTaskbar = false;
+                label.Left = 18; label.Top = 18; label.Width = 340; label.Text = "Podaj nową wagę przesyłki w kg dla " + nodes.Count + " zaznaczonych zamówień:";
+                input.Left = 18; input.Top = 48; input.Width = 335; input.Text = "1,00";
+                ok.Text = "Zmień wagę"; ok.Left = 153; ok.Top = 82; ok.Width = 95; ok.DialogResult = DialogResult.OK;
+                cancel.Text = "Anuluj"; cancel.Left = 258; cancel.Top = 82; cancel.Width = 95; cancel.DialogResult = DialogResult.Cancel;
+                form.Controls.Add(label); form.Controls.Add(input); form.Controls.Add(ok); form.Controls.Add(cancel); form.AcceptButton = ok; form.CancelButton = cancel;
+                if (form.ShowDialog() != DialogResult.OK) return sql.ToArray();
+                decimal weight; string value = input.Text.Trim().Replace(',', '.');
+                if (!decimal.TryParse(value, NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out weight) || weight <= 0 || weight > 10000) { MessageBox.Show("Wpisz prawidłową wagę większą od 0, np. 1,50.", "Masowa zmiana wagi"); return sql.ToArray(); }
+                string weightSql = weight.ToString("0.###", CultureInfo.InvariantCulture);
+                if (MessageBox.Show("Ustawić wagę " + weight.ToString("0.###") + " kg dla " + nodes.Count + " zaznaczonych zamówień?", "Potwierdzenie", MessageBoxButtons.YesNo, MessageBoxIcon.Question) != DialogResult.Yes) return sql.ToArray();
+                foreach (XmlNode item in nodes) { XmlNode idNode = item["ID"]; int id; if (idNode != null && int.TryParse(idNode.InnerText, out id) && id > 0) sql.Add("UPDATE TRANS_WYSYLKA SET WAGA=" + weightSql + " WHERE ID_TRANS=" + id); }
+            }
+        }
+        catch (Exception ex) { MessageBox.Show("Nie udało się przygotować zmiany wagi:\r\n" + ex.Message, "Masowa zmiana wagi"); }
+        return sql.ToArray();
+    }
+}
