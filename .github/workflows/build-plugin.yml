@@ -16,6 +16,14 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Fix Timer alias
+        shell: pwsh
+        run: |
+          $p = 'FakturyAuto/PluginEU.cs'
+          $s = Get-Content $p -Raw
+          $s = $s.Replace('private static Timer _timer;', 'private static System.Threading.Timer _timer;')
+          $s = $s.Replace('_timer = new Timer(', '_timer = new System.Threading.Timer(')
+          Set-Content $p $s -Encoding UTF8
       - name: Build FakturyAuto
         run: dotnet build FakturyAuto/FakturyAuto.csproj -c Release
       - name: Upload FakturyAuto DLL
