@@ -1,4 +1,4 @@
-name: Build EasyUploader Employee Lock
+name: Build EasyUploader Invoice Diagnostics
 
 on:
   push:
@@ -16,10 +16,10 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Build employee lock
-        run: dotnet build BlokadaEdycji/BlokadaEdycji.csproj -c Release
-      - name: Upload lock DLL
+      - name: Build invoice diagnostics
+        run: dotnet build FakturyAutoDiag/FakturyAutoDiag.csproj -c Release
+      - name: Upload diagnostics DLL
         uses: actions/upload-artifact@v4
         with:
-          name: BlokadaEdycji-DLL
-          path: "BlokadaEdycji/bin/Release/net48/ELEKTROMET - BlokadaEdycji.dll"
+          name: FakturyAutoDiag-DLL
+          path: "FakturyAutoDiag/bin/Release/net48/ELEKTROMET - FakturyAuto DIAG.dll"
