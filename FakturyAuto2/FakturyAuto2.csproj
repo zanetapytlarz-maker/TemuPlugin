@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net48</TargetFramework><LangVersion>latest</LangVersion><AssemblyName>ELEKTROMET - FakturyAuto</AssemblyName></PropertyGroup>
+  <ItemGroup><Reference Include="System.Windows.Forms"/><Reference Include="System.Net.Http"/><Reference Include="System.Web.Extensions"/></ItemGroup>
+  <ItemGroup><Compile Include="..\FakturyAuto\PluginEU.cs" Link="PluginEU.cs" /></ItemGroup>
+  <PropertyGroup><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+</Project>
