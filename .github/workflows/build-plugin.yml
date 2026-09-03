@@ -16,13 +16,16 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Fix Timer alias
+      - name: Patch compatibility and Allegro auth
         shell: pwsh
         run: |
           $p = 'FakturyAuto/PluginEU.cs'
           $s = Get-Content $p -Raw
           $s = $s.Replace('private static Timer _timer;', 'private static System.Threading.Timer _timer;')
           $s = $s.Replace('_timer = new Timer(', '_timer = new System.Threading.Timer(')
+          $old = 'h.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",token);'
+          $new = 'token=(token??"").Trim(); if(token.StartsWith("Bearer ",StringComparison.OrdinalIgnoreCase)) token=token.Substring(7).Trim(); h.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",token);'
+          $s = $s.Replace($old, $new)
           Set-Content $p $s -Encoding UTF8
       - name: Build FakturyAuto
         run: dotnet build FakturyAuto/FakturyAuto.csproj -c Release
