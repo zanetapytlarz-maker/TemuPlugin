@@ -14,7 +14,7 @@ public class PluginEU
     private static readonly Dictionary<DataGridView, GridGuard> _grids = new Dictionary<DataGridView, GridGuard>();
 
     [DisplayName("Włącz blokadę ceny i ilości")]
-    public static string[] T_Wlacz_blokade_ceny_i_ilosci(string xml)
+    public static string[] T_Wlacz_blokade_ceny_i_ilosci(object zazn)
     {
         _aktywna = true; EnsureTimer(); ApplyToOpenWindows();
         MessageBox.Show("Blokada pracownicza jest WŁĄCZONA.\n\nChronione pola: Cena jedn., Ilość i Kwota pozycji.\nPozostałe funkcje zamówienia pozostają dostępne.", "ELEKTROMET – blokada edycji", MessageBoxButtons.OK, MessageBoxIcon.Information);
@@ -22,7 +22,7 @@ public class PluginEU
     }
 
     [DisplayName("Wyłącz blokadę – ADMIN")]
-    public static string[] T_Wylacz_blokade_ADMIN(string xml)
+    public static string[] T_Wylacz_blokade_ADMIN(object zazn)
     {
         string entered = PromptPin(); if (entered == null) return new string[0];
         if (!String.Equals(entered, GetAdminPin(), StringComparison.Ordinal)) { MessageBox.Show("Nieprawidłowy kod administratora.", "ELEKTROMET – blokada edycji", MessageBoxButtons.OK, MessageBoxIcon.Warning); return new string[0]; }
@@ -32,7 +32,7 @@ public class PluginEU
     }
 
     [DisplayName("Status blokady")]
-    public static string[] T_Status_blokady(string xml) { MessageBox.Show(_aktywna ? "Blokada pracownicza: WŁĄCZONA" : "Blokada pracownicza: WYŁĄCZONA", "ELEKTROMET – status", MessageBoxButtons.OK, MessageBoxIcon.Information); return new string[0]; }
+    public static string[] T_Status_blokady(object zazn) { MessageBox.Show(_aktywna ? "Blokada pracownicza: WŁĄCZONA" : "Blokada pracownicza: WYŁĄCZONA", "ELEKTROMET – status", MessageBoxButtons.OK, MessageBoxIcon.Information); return new string[0]; }
 
     private static void EnsureTimer() { if (_timer != null) return; _timer = new Timer(); _timer.Interval = 700; _timer.Tick += delegate { if (_aktywna) ApplyToOpenWindows(); }; _timer.Start(); }
     private static void ApplyToOpenWindows()
