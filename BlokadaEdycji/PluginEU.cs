@@ -12,12 +12,13 @@ public class PluginEU
     private static bool _aktywna;
     private static Timer _timer;
     private static readonly Dictionary<DataGridView, GridGuard> _grids = new Dictionary<DataGridView, GridGuard>();
+    private static readonly Dictionary<Control, bool> _protectedControls = new Dictionary<Control, bool>();
 
-    [DisplayName("Włącz blokadę ceny i ilości")]
+    [DisplayName("Włącz blokadę ceny, ilości i wysyłki")]
     public static string[] T_Wlacz_blokade_ceny_i_ilosci(object zazn)
     {
         _aktywna = true; EnsureTimer(); ApplyToOpenWindows();
-        MessageBox.Show("Blokada pracownicza jest WŁĄCZONA.\n\nChronione pola: Cena jedn., Ilość i Kwota pozycji.\nPozostałe funkcje zamówienia pozostają dostępne.", "ELEKTROMET – blokada edycji", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        MessageBox.Show("Blokada pracownicza jest WŁĄCZONA.\n\nChronione pola: Cena jedn., Ilość, Kwota pozycji oraz Koszt wysyłki.\nPozostałe funkcje zamówienia pozostają dostępne.", "ELEKTROMET – blokada edycji", MessageBoxButtons.OK, MessageBoxIcon.Information);
         return new string[0];
     }
 
@@ -27,7 +28,7 @@ public class PluginEU
         string entered = PromptPin(); if (entered == null) return new string[0];
         if (!String.Equals(entered, GetAdminPin(), StringComparison.Ordinal)) { MessageBox.Show("Nieprawidłowy kod administratora.", "ELEKTROMET – blokada edycji", MessageBoxButtons.OK, MessageBoxIcon.Warning); return new string[0]; }
         _aktywna = false; RestoreAll();
-        MessageBox.Show("Blokada została wyłączona na tym stanowisku.\nAby ponownie zabezpieczyć edycję, wybierz: Włącz blokadę ceny i ilości.", "ELEKTROMET – ADMIN", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        MessageBox.Show("Blokada została wyłączona na tym stanowisku.\nAby ponownie zabezpieczyć edycję, wybierz: Włącz blokadę ceny, ilości i wysyłki.", "ELEKTROMET – ADMIN", MessageBoxButtons.OK, MessageBoxIcon.Information);
         return new string[0];
     }
 
@@ -40,12 +41,31 @@ public class PluginEU
         foreach (Form f in Application.OpenForms.Cast<Form>().ToArray())
         {
             if (f.GetType().FullName != "EasyUploader.Features.Transakcje.Edycja.FormTransakcjeEdycja") continue;
-            DataGridView grid = FindByName(f, "dataZgrupowane") as DataGridView; if (grid == null) continue;
-            GridGuard guard; if (!_grids.TryGetValue(grid, out guard)) { guard = new GridGuard(grid); _grids.Add(grid, guard); } guard.Lock();
+
+            DataGridView grid = FindByName(f, "dataZgrupowane") as DataGridView;
+            if (grid != null)
+            {
+                GridGuard guard; if (!_grids.TryGetValue(grid, out guard)) { guard = new GridGuard(grid); _grids.Add(grid, guard); } guard.Lock();
+            }
+
+            LockControl(FindByName(f, "numericKosztWysylki"));
         }
     }
+
+    private static void LockControl(Control c)
+    {
+        if (c == null || c.IsDisposed) return;
+        if (!_protectedControls.ContainsKey(c)) _protectedControls[c] = c.Enabled;
+        c.Enabled = false;
+    }
+
     private static Control FindByName(Control root, string name) { if (root.Name == name) return root; foreach (Control child in root.Controls) { Control found = FindByName(child, name); if (found != null) return found; } return null; }
-    private static void RestoreAll() { foreach (GridGuard g in _grids.Values.ToArray()) g.Unlock(); }
+    private static void RestoreAll()
+    {
+        foreach (GridGuard g in _grids.Values.ToArray()) g.Unlock();
+        foreach (var kv in _protectedControls.ToArray()) { try { if (!kv.Key.IsDisposed) kv.Key.Enabled = kv.Value; } catch { } }
+        _protectedControls.Clear();
+    }
 
     private sealed class GridGuard
     {
