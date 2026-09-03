@@ -24,7 +24,8 @@ jobs:
           $s = $s.Replace('private static Timer _timer;', 'private static System.Threading.Timer _timer;')
           $s = $s.Replace('_timer = new Timer(', '_timer = new System.Threading.Timer(')
           $old = 'h.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",token);'
-          $new = 'token=(token??"").Trim(); if(token.StartsWith("Bearer ",StringComparison.OrdinalIgnoreCase)) token=token.Substring(7).Trim(); h.DefaultRequestHeaders.Authorization=new AuthenticationHeaderValue("Bearer",token);'
+          $new = 'token=(token??"").Trim(); var bm=Regex.Match(token,@"(?i)Bearer\s+([A-Za-z0-9._~+\-/]+=*)"); if(bm.Success) token=bm.Groups[1].Value; else { int cut=token.IndexOfAny(new char[]{'','',','}); if(cut>=0) token=token.Substring(0,cut); if(token.StartsWith("Bearer ",StringComparison.OrdinalIgnoreCase)) token=token.Substring(7); token=token.Trim(); } h.DefaultRequestHeaders.Remove("Authorization"); h.DefaultRequestHeaders.TryAddWithoutValidation("Authorization","Bearer "+token);'
+          $new = $new.Replace("new char[]{'','',','}", "new char[]{'\\r','\\n',','}")
           $s = $s.Replace($old, $new)
           Set-Content $p $s -Encoding UTF8
       - name: Build FakturyAuto
