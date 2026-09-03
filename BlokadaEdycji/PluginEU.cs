@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -7,11 +8,12 @@ using System.Windows.Forms;
 
 public class PluginEU
 {
-    public string WersjaEU { get { return "3.40.3"; } }
+    public static string WersjaEU { get { return "3.44.0"; } }
     private static bool _aktywna;
     private static Timer _timer;
     private static readonly Dictionary<DataGridView, GridGuard> _grids = new Dictionary<DataGridView, GridGuard>();
 
+    [DisplayName("Włącz blokadę ceny i ilości")]
     public static string[] T_Wlacz_blokade_ceny_i_ilosci(string xml)
     {
         _aktywna = true; EnsureTimer(); ApplyToOpenWindows();
@@ -19,6 +21,7 @@ public class PluginEU
         return new string[0];
     }
 
+    [DisplayName("Wyłącz blokadę – ADMIN")]
     public static string[] T_Wylacz_blokade_ADMIN(string xml)
     {
         string entered = PromptPin(); if (entered == null) return new string[0];
@@ -28,6 +31,7 @@ public class PluginEU
         return new string[0];
     }
 
+    [DisplayName("Status blokady")]
     public static string[] T_Status_blokady(string xml) { MessageBox.Show(_aktywna ? "Blokada pracownicza: WŁĄCZONA" : "Blokada pracownicza: WYŁĄCZONA", "ELEKTROMET – status", MessageBoxButtons.OK, MessageBoxIcon.Information); return new string[0]; }
 
     private static void EnsureTimer() { if (_timer != null) return; _timer = new Timer(); _timer.Interval = 700; _timer.Tick += delegate { if (_aktywna) ApplyToOpenWindows(); }; _timer.Start(); }
