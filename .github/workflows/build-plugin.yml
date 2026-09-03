@@ -1,4 +1,4 @@
-name: Build EasyUploader Diagnostics
+name: Build EasyUploader Employee Lock
 
 on:
   push:
@@ -16,10 +16,10 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Build diagnostics
-        run: dotnet build DiagnostykaEU/DiagnostykaEU.csproj -c Release
-      - name: Upload diagnostics DLL
+      - name: Build employee lock
+        run: dotnet build BlokadaEdycji/BlokadaEdycji.csproj -c Release
+      - name: Upload lock DLL
         uses: actions/upload-artifact@v4
         with:
-          name: DiagnostykaEdycji-DLL
-          path: "DiagnostykaEU/bin/Release/net48/ELEKTROMET - DiagnostykaEdycji.dll"
+          name: BlokadaEdycji-DLL
+          path: "BlokadaEdycji/bin/Release/net48/ELEKTROMET - BlokadaEdycji.dll"
