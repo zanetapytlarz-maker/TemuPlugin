@@ -1,5 +1,4 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.ComponentModel;
 using System.IO;
@@ -7,38 +6,306 @@ using System.Linq;
 using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
 using System.Xml;
 
 public class PluginEU
 {
-    static readonly object Sync=new object();
-    static FileSystemWatcher _watcher; static System.Threading.Timer _timer; static bool _started; static int _processing;
-    static DateTime _lastEvent=DateTime.MinValue,_lastSeenWrite=DateTime.MinValue;
-    static readonly string Dir=@"C:\ImporterEU", Pdf=@"C:\ImporterEU\Faktura.pdf", Log=@"C:\ImporterEU\FakturyAuto.log", Sent=@"C:\ImporterEU\FakturyAuto_sent_v7.txt";
-    public static string WersjaEU{get{StartOnce();return "3.44.0";}}
-    [DisplayName("Faktury Allegro AUTO - status v7")]
-    public static string[] T_FakturyAuto_status(object z){StartOnce();MessageBox.Show("FakturyAuto v7 działa.\r\nUżywa zalogowanego AllegroClient EasyUploader.\r\n\r\nLog: "+Log,"ELEKTROMET - FakturyAuto v7");return new[]{"UPDATE TRANSAKCJE SET ID=ID WHERE 1=0"};}
-    [DisplayName("Faktury Allegro AUTO - test v7")]
-    public static string[] T_FakturyAuto_test(object z){StartOnce();ThreadPool.QueueUserWorkItem(_=>ProcessPdf("TEST RĘCZNY v7"));return new[]{"UPDATE TRANSAKCJE SET ID=ID WHERE 1=0"};}
-    static void StartOnce(){lock(Sync){if(_started)return;_started=true;try{Directory.CreateDirectory(Dir);WriteLog("START v7 ALLEGROCLIENT. BaseDir="+AppDomain.CurrentDomain.BaseDirectory);_watcher=new FileSystemWatcher(Dir,"Faktura.pdf");_watcher.NotifyFilter=NotifyFilters.LastWrite|NotifyFilters.CreationTime|NotifyFilters.Size|NotifyFilters.FileName;_watcher.Changed+=OnPdf;_watcher.Created+=OnPdf;_watcher.Renamed+=OnPdfRenamed;_watcher.EnableRaisingEvents=true;_timer=new System.Threading.Timer(_=>Poll(),null,5000,5000);}catch(Exception ex){WriteLog("BŁĄD START: "+ex);}}}
-    static void OnPdf(object s,FileSystemEventArgs e){_lastEvent=DateTime.Now;ThreadPool.QueueUserWorkItem(_=>{Thread.Sleep(2500);ProcessPdf("WATCHER "+e.ChangeType);});}
-    static void OnPdfRenamed(object s,RenamedEventArgs e){_lastEvent=DateTime.Now;ThreadPool.QueueUserWorkItem(_=>{Thread.Sleep(2500);ProcessPdf("WATCHER Renamed");});}
-    static void Poll(){try{if(!File.Exists(Pdf))return;var t=File.GetLastWriteTime(Pdf);if(t>_lastSeenWrite&&(DateTime.Now-t).TotalMinutes<15){_lastSeenWrite=t;if((DateTime.Now-_lastEvent).TotalSeconds>4)ProcessPdf("POLL v7");}}catch{}}
-    static void ProcessPdf(string reason){if(Interlocked.Exchange(ref _processing,1)==1)return;try{if(!File.Exists(Pdf)||!WaitReady(Pdf,20))return;var fi=new FileInfo(Pdf);if(fi.Length<1000)return;var xmlPath=FindMatchingXml(fi.LastWriteTime);if(xmlPath==null){WriteLog("STOP: brak pasującego XML");return;}var xml=File.ReadAllText(xmlPath,Encoding.UTF8);string account=GetText(xml,"Konto"),checkout=GetText(xml,"AllFodId");byte[] pdf=File.ReadAllBytes(Pdf);string invoiceNo=FindInvoiceNumberFromPdf(pdf);if(String.IsNullOrWhiteSpace(invoiceNo))invoiceNo="FS-AUTO-"+DateTime.Now.ToString("yyyyMMdd-HHmmss");string key=checkout+"|"+Hash(pdf);WriteLog("NOWY PDF v7: "+fi.Length+" B | XML="+Path.GetFileName(xmlPath)+" | checkout="+checkout+" | konto="+account+" | numer="+invoiceNo+" | "+reason);if(String.IsNullOrWhiteSpace(checkout)||String.IsNullOrWhiteSpace(account)){WriteLog("STOP: brak checkout/konta");return;}if(AlreadySent(key)){WriteLog("POMINIĘTO duplikat: "+checkout);return;}UploadViaEuAllegroClient(account,checkout,invoiceNo,pdf);MarkSent(key+"|"+invoiceNo);WriteLog("SUKCES v7: PDF faktury wysłany do Allegro. checkout="+checkout+" numer="+invoiceNo);}catch(TargetInvocationException tie){WriteLog("BŁĄD v7: "+(tie.InnerException??tie));}catch(Exception ex){WriteLog("BŁĄD PROCESS v7: "+ex);}finally{Interlocked.Exchange(ref _processing,0);}}
-    static void UploadViaEuAllegroClient(string account,string checkout,string invoiceNo,byte[] pdf){Assembly a=EuAsm();if(a==null)throw new Exception("Brak EasyUploader assembly");Type ct=a.GetType("EasyUploader.Features.Markety.Clients.AllegroClient");if(ct==null)throw new Exception("Brak AllegroClient");object client=Activator.CreateInstance(ct,BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic,null,new object[]{account,false},null);WriteLog("AllegroClient utworzony dla konta "+account);var validate=ct.GetMethod("ValidateConnection",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic);if(validate!=null)validate.Invoke(client,null);MethodInfo send=ct.GetMethod("CreateAndSendRequest",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic);if(send==null)throw new Exception("Brak CreateAndSendRequest");string path="/order/checkout-forms/"+checkout+"/invoices";var body=new Dictionary<string,object>{{"invoiceNumber",invoiceNo}};WriteLog("POST -> "+path);object resp=send.Invoke(client,new object[]{"POST",path,body,null,"application/vnd.allegro.public.v1+json"});DumpObject(resp,"v7_POST_Response");string txt=ResponseText(resp);WriteLog("POST response: "+Short(txt));string invId=ExtractId(txt,resp);if(String.IsNullOrWhiteSpace(invId))throw new Exception("Nie znaleziono invoiceId po POST. Odpowiedź: "+Short(txt));WriteLog("invoiceId="+invId);Type rbType=a.GetType("EasyUploader.Core.Clients.RequestBinary");if(rbType==null)throw new Exception("Brak RequestBinary");object rb=CreateRequestBinary(rbType,pdf);DumpObject(rb,"v7_RequestBinary");string filePath="/order/checkout-forms/"+checkout+"/invoices/"+invId+"/file";WriteLog("PUT -> "+filePath);object put=send.Invoke(client,new object[]{"PUT",filePath,null,rb,"application/pdf"});DumpObject(put,"v7_PUT_Response");string putTxt=ResponseText(put);WriteLog("PUT response: "+Short(putTxt));}
-    static object CreateRequestBinary(Type t,byte[] pdf){try{var c=t.GetConstructor(new[]{typeof(byte[]),typeof(bool),typeof(string),typeof(string),typeof(string)});if(c!=null)return c.Invoke(new object[]{pdf,false,"application/pdf","file","Faktura.pdf"});}catch{}foreach(var c in t.GetConstructors(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic).OrderBy(x=>x.GetParameters().Length)){try{var ps=c.GetParameters();var args=new object[ps.Length];for(int i=0;i<ps.Length;i++){var pt=ps[i].ParameterType;string n=(ps[i].Name??"").ToLowerInvariant();if(pt==typeof(byte[]))args[i]=pdf;else if(pt==typeof(string)){if(n.Contains("content")||n.Contains("type"))args[i]="application/pdf";else if(n.Contains("form"))args[i]="file";else if(n.Contains("file")||n.Contains("name"))args[i]="Faktura.pdf";else args[i]="";}else if(pt==typeof(bool))args[i]=false;else args[i]=pt.IsValueType?Activator.CreateInstance(pt):null;}return c.Invoke(args);}catch{}}throw new Exception("Nie udało się utworzyć RequestBinary");}
-    static string ResponseText(object o){if(o==null)return"";if(o is string)return(string)o;Type t=o.GetType();foreach(string n in new[]{"String","Object","Array","Content","Body","Response","Text","Data","Result"}){try{var p=t.GetProperty(n,BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic);if(p!=null){var v=p.GetValue(o,null);if(v!=null){var s=Convert.ToString(v);if(!String.IsNullOrWhiteSpace(s))return s;}}}catch{}}return Convert.ToString(o);}
-    static string ExtractId(string txt,object resp){string s=txt??"";string id=ExtractIdFromText(s);if(!String.IsNullOrWhiteSpace(id))return id;try{if(resp!=null){var op=resp.GetType().GetProperty("Object",BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic);if(op!=null){var obj=op.GetValue(resp,null);if(obj!=null){id=ExtractIdFromText(Convert.ToString(obj));if(!String.IsNullOrWhiteSpace(id))return id;}}}}catch{}return null;}
-    static string ExtractIdFromText(string s){if(String.IsNullOrEmpty(s))return null;int p=s.IndexOf("\"id\"",StringComparison.OrdinalIgnoreCase);if(p<0)p=s.IndexOf("'id'",StringComparison.OrdinalIgnoreCase);if(p<0)return null;int colon=s.IndexOf(':',p);if(colon<0)return null;int q1=s.IndexOf('"',colon+1);if(q1<0)return null;int q2=s.IndexOf('"',q1+1);if(q2<=q1)return null;return s.Substring(q1+1,q2-q1-1);}
-    static void DumpObject(object o,string name){try{if(o==null)return;var sb=new StringBuilder();var t=o.GetType();sb.AppendLine("TYPE "+t.FullName);foreach(var p in t.GetProperties(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)){string v="";try{if(p.GetIndexParameters().Length==0){var x=p.GetValue(o,null);if(x!=null)v=" = "+Safe(x);}}catch{}sb.AppendLine("PROP "+p.PropertyType.FullName+" "+p.Name+v);}foreach(var f in t.GetFields(BindingFlags.Instance|BindingFlags.Public|BindingFlags.NonPublic)){string v="";try{var x=f.GetValue(o);if(x!=null)v=" = "+Safe(x);}catch{}sb.AppendLine("FIELD "+f.FieldType.FullName+" "+f.Name+v);}File.WriteAllText(Path.Combine(Dir,"FakturyAuto_"+name+".txt"),sb.ToString(),Encoding.UTF8);}catch{}}
-    static string Safe(object v){if(v is byte[])return"byte["+((byte[])v).Length+"]";string s=Convert.ToString(v);return s.Length>800?s.Substring(0,800):s;}static string Short(string s){s=s??"";return s.Length>800?s.Substring(0,800):s;}
-    static Assembly EuAsm(){return AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(x=>String.Equals(x.GetName().Name,"EasyUploader",StringComparison.OrdinalIgnoreCase));}
-    static string FindInvoiceNumberFromPdf(byte[] pdf){try{string s=Encoding.GetEncoding(1252).GetString(pdf);var m=Regex.Match(s,@"\b(?:FS|FV)\s*[0-9]{1,6}\s*[/.-]\s*[0-9]{1,2}\s*[/.-]\s*[0-9]{4}(?:\s*[/.-]\s*[A-Za-z0-9_-]{1,8})?\b",RegexOptions.IgnoreCase);if(m.Success)return Regex.Replace(m.Value,@"\s+","");}catch{}return null;}
-    static string FindMatchingXml(DateTime t){try{return Directory.GetFiles(Dir,"*.xml").Select(p=>new FileInfo(p)).Where(f=>f.LastWriteTime<=t.AddMinutes(2)&&f.LastWriteTime>=t.AddMinutes(-30)).OrderByDescending(f=>f.LastWriteTime).Select(f=>f.FullName).FirstOrDefault();}catch{return null;}}
-    static string GetText(string xml,string node){try{var d=new XmlDocument();d.LoadXml(xml);var n=d.SelectSingleNode("//DaneTransStruct/"+node)??d.SelectSingleNode("//"+node);return n==null?null:(n.InnerText??"").Trim();}catch{return null;}}
-    static bool WaitReady(string p,int sec){for(int i=0;i<sec*2;i++){try{using(var f=new FileStream(p,FileMode.Open,FileAccess.Read,FileShare.Read)){if(f.Length>0)return true;}}catch{Thread.Sleep(500);}}return false;}
-    static string Hash(byte[] b){using(var s=SHA256.Create())return BitConverter.ToString(s.ComputeHash(b)).Replace("-","");}static bool AlreadySent(string k){try{return File.Exists(Sent)&&File.ReadAllLines(Sent).Any(x=>x.Contains(k));}catch{return false;}}static void MarkSent(string s){try{File.AppendAllText(Sent,DateTime.Now.ToString("s")+"|"+s+Environment.NewLine,Encoding.UTF8);}catch{}}static void WriteLog(string s){try{Directory.CreateDirectory(Dir);File.AppendAllText(Log,DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss")+" | "+s+Environment.NewLine,Encoding.UTF8);}catch{}}
+    static readonly object Sync = new object();
+    static FileSystemWatcher _watcher;
+    static System.Threading.Timer _timer;
+    static bool _started;
+    static int _processing;
+    static DateTime _lastEvent = DateTime.MinValue, _lastSeenWrite = DateTime.MinValue;
+    static readonly string Dir = @"C:\ImporterEU";
+    static readonly string Pdf = @"C:\ImporterEU\Faktura.pdf";
+    static readonly string Log = @"C:\ImporterEU\FakturyAuto.log";
+    static readonly string Sent = @"C:\ImporterEU\FakturyAuto_sent_v8.txt";
+
+    public static string WersjaEU { get { StartOnce(); return "3.44.0"; } }
+
+    [DisplayName("Faktury Allegro AUTO - status v8")]
+    public static string[] T_FakturyAuto_status(object z)
+    {
+        StartOnce();
+        MessageBox.Show("FakturyAuto v8 działa.\r\nLog: " + Log, "ELEKTROMET - FakturyAuto v8");
+        return new[] { "UPDATE TRANSAKCJE SET ID=ID WHERE 1=0" };
+    }
+
+    [DisplayName("Faktury Allegro AUTO - test v8")]
+    public static string[] T_FakturyAuto_test(object z)
+    {
+        StartOnce();
+        ThreadPool.QueueUserWorkItem(_ => ProcessPdf("TEST RĘCZNY v8"));
+        return new[] { "UPDATE TRANSAKCJE SET ID=ID WHERE 1=0" };
+    }
+
+    static void StartOnce()
+    {
+        lock (Sync)
+        {
+            if (_started) return;
+            _started = true;
+            try
+            {
+                Directory.CreateDirectory(Dir);
+                WriteLog("START v8 ALLEGROCLIENT. BaseDir=" + AppDomain.CurrentDomain.BaseDirectory);
+                _watcher = new FileSystemWatcher(Dir, "Faktura.pdf");
+                _watcher.NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.CreationTime | NotifyFilters.Size | NotifyFilters.FileName;
+                _watcher.Changed += OnPdf;
+                _watcher.Created += OnPdf;
+                _watcher.Renamed += OnPdfRenamed;
+                _watcher.EnableRaisingEvents = true;
+                _timer = new System.Threading.Timer(_ => Poll(), null, 5000, 5000);
+            }
+            catch (Exception ex) { WriteLog("BŁĄD START: " + ex); }
+        }
+    }
+
+    static void OnPdf(object s, FileSystemEventArgs e)
+    {
+        _lastEvent = DateTime.Now;
+        ThreadPool.QueueUserWorkItem(_ => { Thread.Sleep(2500); ProcessPdf("WATCHER " + e.ChangeType); });
+    }
+
+    static void OnPdfRenamed(object s, RenamedEventArgs e)
+    {
+        _lastEvent = DateTime.Now;
+        ThreadPool.QueueUserWorkItem(_ => { Thread.Sleep(2500); ProcessPdf("WATCHER Renamed"); });
+    }
+
+    static void Poll()
+    {
+        try
+        {
+            if (!File.Exists(Pdf)) return;
+            var t = File.GetLastWriteTime(Pdf);
+            if (t > _lastSeenWrite && (DateTime.Now - t).TotalMinutes < 15)
+            {
+                _lastSeenWrite = t;
+                if ((DateTime.Now - _lastEvent).TotalSeconds > 4) ProcessPdf("POLL v8");
+            }
+        }
+        catch { }
+    }
+
+    static void ProcessPdf(string reason)
+    {
+        if (Interlocked.Exchange(ref _processing, 1) == 1) return;
+        try
+        {
+            if (!File.Exists(Pdf) || !WaitReady(Pdf, 20)) return;
+            var fi = new FileInfo(Pdf);
+            if (fi.Length < 1000) return;
+            string xmlPath = FindMatchingXml(fi.LastWriteTime);
+            if (xmlPath == null) { WriteLog("STOP: brak pasującego XML"); return; }
+            string xml = File.ReadAllText(xmlPath, Encoding.UTF8);
+            string account = GetText(xml, "Konto");
+            string checkout = GetText(xml, "AllFodId");
+            byte[] pdf = File.ReadAllBytes(Pdf);
+            string key = checkout + "|" + Hash(pdf);
+            WriteLog("NOWY PDF v8: " + fi.Length + " B | XML=" + Path.GetFileName(xmlPath) + " | checkout=" + checkout + " | konto=" + account + " | " + reason);
+            if (String.IsNullOrWhiteSpace(checkout) || String.IsNullOrWhiteSpace(account)) { WriteLog("STOP: brak checkout/konta"); return; }
+            if (AlreadySent(key)) { WriteLog("POMINIĘTO duplikat: " + checkout); return; }
+            UploadViaEuAllegroClient(account, checkout, pdf);
+            MarkSent(key);
+            WriteLog("SUKCES v8: PDF faktury wysłany do Allegro. checkout=" + checkout);
+        }
+        catch (TargetInvocationException tie) { WriteLog("BŁĄD v8: " + (tie.InnerException ?? tie)); }
+        catch (Exception ex) { WriteLog("BŁĄD PROCESS v8: " + ex); }
+        finally { Interlocked.Exchange(ref _processing, 0); }
+    }
+
+    static void UploadViaEuAllegroClient(string account, string checkout, byte[] pdf)
+    {
+        Assembly a = EuAsm();
+        if (a == null) throw new Exception("Brak EasyUploader assembly");
+        Type ct = a.GetType("EasyUploader.Features.Markety.Clients.AllegroClient");
+        if (ct == null) throw new Exception("Brak AllegroClient");
+        object client = Activator.CreateInstance(ct, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null, new object[] { account, false }, null);
+        WriteLog("AllegroClient utworzony dla konta " + account);
+        var validate = ct.GetMethod("ValidateConnection", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (validate != null) validate.Invoke(client, null);
+        MethodInfo send = ct.GetMethod("CreateAndSendRequest", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (send == null) throw new Exception("Brak CreateAndSendRequest");
+
+        string path = "/order/checkout-forms/" + checkout + "/invoices";
+        var fileMeta = new Dictionary<string, object> { { "name", "Faktura.pdf" } };
+        var body = new Dictionary<string, object> { { "file", fileMeta } };
+        WriteLog("POST v8 -> " + path + " | file.name=Faktura.pdf");
+        object resp = send.Invoke(client, new object[] { "POST", path, body, null, "application/vnd.allegro.public.v1+json" });
+        DumpObject(resp, "v8_POST_Response");
+        string txt = ResponseText(resp);
+        WriteLog("POST response: " + Short(txt));
+        string invId = ExtractId(txt, resp);
+        if (String.IsNullOrWhiteSpace(invId)) throw new Exception("Nie znaleziono invoiceId po POST. Odpowiedź: " + Short(txt));
+        WriteLog("invoiceId=" + invId);
+
+        Type rbType = a.GetType("EasyUploader.Core.Clients.RequestBinary");
+        if (rbType == null) throw new Exception("Brak RequestBinary");
+        object rb = CreateRequestBinary(rbType, pdf);
+        DumpObject(rb, "v8_RequestBinary");
+        string filePath = "/order/checkout-forms/" + checkout + "/invoices/" + invId + "/file";
+        WriteLog("PUT v8 -> " + filePath + " | bytes=" + pdf.Length);
+        object put = send.Invoke(client, new object[] { "PUT", filePath, null, rb, "application/vnd.allegro.public.v1+json" });
+        DumpObject(put, "v8_PUT_Response");
+        WriteLog("PUT response: " + Short(ResponseText(put)));
+    }
+
+    static object CreateRequestBinary(Type t, byte[] pdf)
+    {
+        var c = t.GetConstructor(new[] { typeof(byte[]), typeof(bool), typeof(string), typeof(string), typeof(string) });
+        if (c != null)
+        {
+            try { return c.Invoke(new object[] { pdf, false, "application/pdf", "file", "Faktura.pdf" }); } catch { }
+            try { return c.Invoke(new object[] { pdf, true, "application/pdf", "file", "Faktura.pdf" }); } catch { }
+        }
+        foreach (var ctor in t.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic).OrderBy(x => x.GetParameters().Length))
+        {
+            try
+            {
+                var ps = ctor.GetParameters();
+                var args = new object[ps.Length];
+                for (int i = 0; i < ps.Length; i++)
+                {
+                    Type pt = ps[i].ParameterType;
+                    string n = (ps[i].Name ?? "").ToLowerInvariant();
+                    if (pt == typeof(byte[])) args[i] = pdf;
+                    else if (pt == typeof(bool)) args[i] = false;
+                    else if (pt == typeof(string))
+                    {
+                        if (n.Contains("content") || n.Contains("type")) args[i] = "application/pdf";
+                        else if (n.Contains("form")) args[i] = "file";
+                        else if (n.Contains("file") || n.Contains("name")) args[i] = "Faktura.pdf";
+                        else args[i] = "";
+                    }
+                    else args[i] = pt.IsValueType ? Activator.CreateInstance(pt) : null;
+                }
+                return ctor.Invoke(args);
+            }
+            catch { }
+        }
+        throw new Exception("Nie udało się utworzyć RequestBinary");
+    }
+
+    static string ResponseText(object o)
+    {
+        if (o == null) return "";
+        if (o is string) return (string)o;
+        Type t = o.GetType();
+        foreach (string n in new[] { "String", "Object", "Array", "Content", "Body", "Response", "Text", "Data", "Result" })
+        {
+            try
+            {
+                var p = t.GetProperty(n, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (p != null)
+                {
+                    var v = p.GetValue(o, null);
+                    if (v != null)
+                    {
+                        string s = Convert.ToString(v);
+                        if (!String.IsNullOrWhiteSpace(s)) return s;
+                    }
+                }
+            }
+            catch { }
+        }
+        return Convert.ToString(o);
+    }
+
+    static string ExtractId(string txt, object resp)
+    {
+        string id = ExtractIdFromText(txt ?? "");
+        if (!String.IsNullOrWhiteSpace(id)) return id;
+        try
+        {
+            if (resp != null)
+            {
+                var op = resp.GetType().GetProperty("Object", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                if (op != null)
+                {
+                    var obj = op.GetValue(resp, null);
+                    if (obj != null)
+                    {
+                        id = ExtractIdFromText(Convert.ToString(obj));
+                        if (!String.IsNullOrWhiteSpace(id)) return id;
+                    }
+                }
+            }
+        }
+        catch { }
+        return null;
+    }
+
+    static string ExtractIdFromText(string s)
+    {
+        if (String.IsNullOrEmpty(s)) return null;
+        int p = s.IndexOf("\"id\"", StringComparison.OrdinalIgnoreCase);
+        if (p < 0) p = s.IndexOf("'id'", StringComparison.OrdinalIgnoreCase);
+        if (p < 0) return null;
+        int colon = s.IndexOf(':', p);
+        if (colon < 0) return null;
+        int q1 = s.IndexOf('"', colon + 1);
+        if (q1 < 0) return null;
+        int q2 = s.IndexOf('"', q1 + 1);
+        if (q2 <= q1) return null;
+        return s.Substring(q1 + 1, q2 - q1 - 1);
+    }
+
+    static void DumpObject(object o, string name)
+    {
+        try
+        {
+            if (o == null) return;
+            var sb = new StringBuilder();
+            Type t = o.GetType();
+            sb.AppendLine("TYPE " + t.FullName);
+            foreach (var p in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                string v = "";
+                try { if (p.GetIndexParameters().Length == 0) { var x = p.GetValue(o, null); if (x != null) v = " = " + Safe(x); } } catch { }
+                sb.AppendLine("PROP " + p.PropertyType.FullName + " " + p.Name + v);
+            }
+            foreach (var f in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+            {
+                string v = "";
+                try { var x = f.GetValue(o); if (x != null) v = " = " + Safe(x); } catch { }
+                sb.AppendLine("FIELD " + f.FieldType.FullName + " " + f.Name + v);
+            }
+            File.WriteAllText(Path.Combine(Dir, "FakturyAuto_" + name + ".txt"), sb.ToString(), Encoding.UTF8);
+        }
+        catch { }
+    }
+
+    static string Safe(object v) { if (v is byte[]) return "byte[" + ((byte[])v).Length + "]"; string s = Convert.ToString(v); return s.Length > 800 ? s.Substring(0, 800) : s; }
+    static string Short(string s) { s = s ?? ""; return s.Length > 800 ? s.Substring(0, 800) : s; }
+    static Assembly EuAsm() { return AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(x => String.Equals(x.GetName().Name, "EasyUploader", StringComparison.OrdinalIgnoreCase)); }
+
+    static string FindMatchingXml(DateTime t)
+    {
+        try { return Directory.GetFiles(Dir, "*.xml").Select(p => new FileInfo(p)).Where(f => f.LastWriteTime <= t.AddMinutes(2) && f.LastWriteTime >= t.AddMinutes(-30)).OrderByDescending(f => f.LastWriteTime).Select(f => f.FullName).FirstOrDefault(); }
+        catch { return null; }
+    }
+
+    static string GetText(string xml, string node)
+    {
+        try { var d = new XmlDocument(); d.LoadXml(xml); var n = d.SelectSingleNode("//DaneTransStruct/" + node) ?? d.SelectSingleNode("//" + node); return n == null ? null : (n.InnerText ?? "").Trim(); }
+        catch { return null; }
+    }
+
+    static bool WaitReady(string p, int sec)
+    {
+        for (int i = 0; i < sec * 2; i++)
+        {
+            try { using (var f = new FileStream(p, FileMode.Open, FileAccess.Read, FileShare.Read)) { if (f.Length > 0) return true; } }
+            catch { Thread.Sleep(500); }
+        }
+        return false;
+    }
+
+    static string Hash(byte[] b) { using (var s = SHA256.Create()) return BitConverter.ToString(s.ComputeHash(b)).Replace("-", ""); }
+    static bool AlreadySent(string k) { try { return File.Exists(Sent) && File.ReadAllLines(Sent).Any(x => x.Contains(k)); } catch { return false; } }
+    static void MarkSent(string s) { try { File.AppendAllText(Sent, DateTime.Now.ToString("s") + "|" + s + Environment.NewLine, Encoding.UTF8); } catch { } }
+    static void WriteLog(string s) { try { Directory.CreateDirectory(Dir); File.AppendAllText(Log, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " | " + s + Environment.NewLine, Encoding.UTF8); } catch { } }
 }
