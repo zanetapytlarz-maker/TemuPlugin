@@ -8,15 +8,27 @@ using System.Windows.Forms;
 
 public class PluginEU
 {
-    public static string WersjaEU { get { return "3.44.0"; } }
     private static bool _aktywna;
+    private static bool _started;
     private static Timer _timer;
     private static readonly Dictionary<DataGridView, GridGuard> _grids = new Dictionary<DataGridView, GridGuard>();
     private static readonly Dictionary<Control, bool> _protectedControls = new Dictionary<Control, bool>();
 
+    public static string WersjaEU { get { StartOnce(); return "3.44.0"; } }
+
+    private static void StartOnce()
+    {
+        if (_started) return;
+        _started = true;
+        _aktywna = true;
+        EnsureTimer();
+        ApplyToOpenWindows();
+    }
+
     [DisplayName("Włącz blokadę ceny, ilości i wysyłki")]
     public static string[] T_Wlacz_blokade_ceny_i_ilosci(object zazn)
     {
+        StartOnce();
         _aktywna = true; EnsureTimer(); ApplyToOpenWindows();
         MessageBox.Show("Blokada pracownicza jest WŁĄCZONA.\n\nChronione pola: Cena jedn., Ilość, Kwota pozycji oraz Koszt wysyłki.\nPozostałe funkcje zamówienia pozostają dostępne.", "ELEKTROMET – blokada edycji", MessageBoxButtons.OK, MessageBoxIcon.Information);
         return new string[0];
@@ -25,15 +37,16 @@ public class PluginEU
     [DisplayName("Wyłącz blokadę – ADMIN")]
     public static string[] T_Wylacz_blokade_ADMIN(object zazn)
     {
+        StartOnce();
         string entered = PromptPin(); if (entered == null) return new string[0];
         if (!String.Equals(entered, GetAdminPin(), StringComparison.Ordinal)) { MessageBox.Show("Nieprawidłowy kod administratora.", "ELEKTROMET – blokada edycji", MessageBoxButtons.OK, MessageBoxIcon.Warning); return new string[0]; }
         _aktywna = false; RestoreAll();
-        MessageBox.Show("Blokada została wyłączona na tym stanowisku.\nAby ponownie zabezpieczyć edycję, wybierz: Włącz blokadę ceny, ilości i wysyłki.", "ELEKTROMET – ADMIN", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        MessageBox.Show("Blokada została wyłączona na tym stanowisku do czasu ponownego uruchomienia EasyUploadera.\nPo następnym uruchomieniu EU blokada włączy się automatycznie.", "ELEKTROMET – ADMIN", MessageBoxButtons.OK, MessageBoxIcon.Information);
         return new string[0];
     }
 
     [DisplayName("Status blokady")]
-    public static string[] T_Status_blokady(object zazn) { MessageBox.Show(_aktywna ? "Blokada pracownicza: WŁĄCZONA" : "Blokada pracownicza: WYŁĄCZONA", "ELEKTROMET – status", MessageBoxButtons.OK, MessageBoxIcon.Information); return new string[0]; }
+    public static string[] T_Status_blokady(object zazn) { StartOnce(); MessageBox.Show(_aktywna ? "Blokada pracownicza: WŁĄCZONA" : "Blokada pracownicza: WYŁĄCZONA", "ELEKTROMET – status", MessageBoxButtons.OK, MessageBoxIcon.Information); return new string[0]; }
 
     private static void EnsureTimer() { if (_timer != null) return; _timer = new Timer(); _timer.Interval = 700; _timer.Tick += delegate { if (_aktywna) ApplyToOpenWindows(); }; _timer.Start(); }
     private static void ApplyToOpenWindows()
@@ -41,13 +54,11 @@ public class PluginEU
         foreach (Form f in Application.OpenForms.Cast<Form>().ToArray())
         {
             if (f.GetType().FullName != "EasyUploader.Features.Transakcje.Edycja.FormTransakcjeEdycja") continue;
-
             DataGridView grid = FindByName(f, "dataZgrupowane") as DataGridView;
             if (grid != null)
             {
                 GridGuard guard; if (!_grids.TryGetValue(grid, out guard)) { guard = new GridGuard(grid); _grids.Add(grid, guard); } guard.Lock();
             }
-
             LockControl(FindByName(f, "numericKosztWysylki"));
         }
     }
