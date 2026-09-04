@@ -1,4 +1,4 @@
-name: Build EasyUploader FakturyAuto
+name: Build EasyUploader Plugins
 
 on:
   push:
@@ -30,8 +30,15 @@ jobs:
           Set-Content $p $s -Encoding UTF8
       - name: Build FakturyAuto
         run: dotnet build FakturyAuto/FakturyAuto.csproj -c Release
+      - name: Build BlokadaEdycji
+        run: dotnet build BlokadaEdycji/BlokadaEdycji.csproj -c Release
       - name: Upload FakturyAuto DLL
         uses: actions/upload-artifact@v4
         with:
           name: FakturyAuto-DLL
           path: "FakturyAuto/bin/Release/net48/ELEKTROMET - FakturyAuto.dll"
+      - name: Upload BlokadaEdycji DLL
+        uses: actions/upload-artifact@v4
+        with:
+          name: BlokadaEdycji-AUTO-DLL
+          path: "BlokadaEdycji/bin/Release/net48/ELEKTROMET - BlokadaEdycji.dll"
